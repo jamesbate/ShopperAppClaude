@@ -1,17 +1,25 @@
 import { File } from 'expo-file-system';
 import { ScanResult, ItemCategory } from '../types';
+import { API_CONFIG, isConfigured } from '../config/api';
 
-// Configuration for AI service
-// In production, this would be stored securely
+// Configuration for AI service using Google AI
 interface AIConfig {
   apiKey: string;
   endpoint: string;
+  model: string;
 }
 
 let aiConfig: AIConfig | null = null;
 
-export function configureAI(config: AIConfig) {
-  aiConfig = config;
+// Initialize AI configuration from API config
+export function initializeAI() {
+  if (isConfigured()) {
+    aiConfig = {
+      apiKey: API_CONFIG.GOOGLE_AI_API_KEY,
+      endpoint: API_CONFIG.GOOGLE_AI_ENDPOINT,
+      model: API_CONFIG.GOOGLE_AI_VISION_MODEL,
+    };
+  }
 }
 
 export function isAIConfigured(): boolean {
@@ -118,41 +126,35 @@ export async function analyzeScannedVideo(videoUri: string): Promise<ScanResult>
       };
     }
     
-    // Call AI API (example with OpenAI-style API)
-    const response = await fetch(aiConfig.endpoint, {
+    // Call Google AI API with their format
+    const response = await fetch(`${aiConfig.endpoint}?key=${aiConfig.apiKey}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${aiConfig.apiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o', // or your preferred vision model
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: `Analyze this grocery item video/image. Extract and return as JSON:
-                {
-                  "itemName": "product name",
-                  "barcode": "barcode number if visible",
-                  "expiryDate": "expiry date if visible",
-                  "category": "one of: dairy, meat, produce, bakery, frozen, beverages, snacks, household, personal_care, other",
-                  "confidence": 0.0-1.0
-                }
-                If you cannot identify something, omit that field.`,
-              },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: `data:video/mp4;base64,${videoData}`,
-                },
-              },
-            ],
-          },
-        ],
-        max_tokens: 300,
+        contents: [{
+          parts: [{
+            text: `Analyze this grocery item video/image. Extract and return as JSON:
+            {
+              "itemName": "product name",
+              "barcode": "barcode number if visible", 
+              "expiryDate": "expiry date if visible",
+              "category": "one of: dairy, meat, produce, bakery, frozen, beverages, snacks, household, personal_care, other",
+              "confidence": 0.0-1.0
+            }
+            If you cannot identify something, omit that field.`
+          }, {
+            inline_data: {
+              mime_type: "video/mp4",
+              data: videoData
+            }
+          }]
+        }],
+        generationConfig: {
+          maxOutputTokens: 300,
+          temperature: 0.1,
+        }
       }),
     });
     
@@ -161,7 +163,7 @@ export async function analyzeScannedVideo(videoUri: string): Promise<ScanResult>
     }
     
     const data = await response.json();
-    const aiText = data.choices?.[0]?.message?.content || '';
+    const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     
     const parsed = parseAIResponse(aiText);
     

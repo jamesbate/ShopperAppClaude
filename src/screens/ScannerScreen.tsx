@@ -8,9 +8,9 @@ import {
   Alert,
   Platform,
 } from 'react-native';
-import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
+import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
 import { useShopping } from '../store/ShoppingContext';
-import { analyzeScannedVideo, isAIConfigured } from '../services/aiService';
+import { analyzeScannedVideoLocally, createMockScanResult } from '../services/localAiService';
 import { ScanResult } from '../types';
 
 interface ScannerScreenProps {
@@ -20,75 +20,57 @@ interface ScannerScreenProps {
 
 export function ScannerScreen({ onClose, onScanComplete }: ScannerScreenProps) {
   const [permission, requestPermission] = useCameraPermissions();
-  const [isRecording, setIsRecording] = useState(false);
+  const [isScanning, setIsScanning] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [detectedBarcode, setDetectedBarcode] = useState<string | undefined>();
+  const [detectedTexts, setDetectedTexts] = useState<string[]>([]);
+  const [scanCount, setScanCount] = useState(0);
   const cameraRef = useRef<CameraView>(null);
-  const recordingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastBarcodeRef = useRef<string>('');
   const { findMatchingListItem } = useShopping();
 
   useEffect(() => {
-    return () => {
-      if (recordingTimer.current) {
-        clearInterval(recordingTimer.current);
-      }
-    };
-  }, []);
+    // Auto-process after collecting enough data
+    if (scanCount >= 3 && (detectedBarcode || detectedTexts.length > 0)) {
+      processCollectedData();
+    }
+  }, [scanCount, detectedBarcode, detectedTexts]);
 
-  const startRecording = async () => {
-    if (!cameraRef.current || isRecording) return;
-
-    try {
-      setIsRecording(true);
-      setRecordingDuration(0);
+  const handleBarcodeScanned = (scanningResult: BarcodeScanningResult) => {
+    if (!isScanning || isProcessing) return;
+    
+    const barcode = scanningResult.data;
+    
+    // Avoid processing the same barcode multiple times
+    if (barcode && barcode !== lastBarcodeRef.current) {
+      lastBarcodeRef.current = barcode;
+      setDetectedBarcode(barcode);
+      setScanCount(prev => prev + 1);
       
-      // Start duration timer
-      recordingTimer.current = setInterval(() => {
-        setRecordingDuration((prev) => prev + 1);
-      }, 1000);
-
-      const video = await cameraRef.current.recordAsync({
-        maxDuration: 10, // Max 10 seconds
-      });
-
-      // Stop timer
-      if (recordingTimer.current) {
-        clearInterval(recordingTimer.current);
-        recordingTimer.current = null;
-      }
-
-      if (video?.uri) {
-        await processVideo(video.uri);
-      }
-    } catch (error) {
-      console.error('Recording error:', error);
-      Alert.alert('Error', 'Failed to record video. Please try again.');
-    } finally {
-      setIsRecording(false);
-      setRecordingDuration(0);
+      // Provide haptic feedback if available
+      console.log('Barcode detected:', barcode);
     }
   };
 
-  const stopRecording = async () => {
-    if (!cameraRef.current || !isRecording) return;
-    
-    try {
-      await cameraRef.current.stopRecording();
-    } catch (error) {
-      console.error('Stop recording error:', error);
-    }
-    
-    if (recordingTimer.current) {
-      clearInterval(recordingTimer.current);
-      recordingTimer.current = null;
-    }
+  const handleManualCapture = () => {
+    // User manually triggers capture
+    setIsScanning(false);
+    processCollectedData();
   };
 
-  const processVideo = async (videoUri: string) => {
+  const processCollectedData = async () => {
+    if (isProcessing) return;
+    
     setIsProcessing(true);
+    setIsScanning(false);
     
     try {
-      const result = await analyzeScannedVideo(videoUri);
+      // Use local AI processing with collected data
+      const result = await analyzeScannedVideoLocally(
+        '', // No video file needed for local processing
+        detectedBarcode,
+        detectedTexts
+      );
       
       if (result.success && result.itemName) {
         // Check if item is on shopping list
@@ -99,7 +81,11 @@ export function ScannerScreen({ onClose, onScanComplete }: ScannerScreenProps) {
             'Item Found!',
             `"${result.itemName}" matches "${matchingItem.name}" on your list. Mark as purchased?`,
             [
-              { text: 'Cancel', style: 'cancel' },
+              { 
+                text: 'Scan Another', 
+                style: 'cancel',
+                onPress: resetScan
+              },
               {
                 text: 'Yes',
                 onPress: () => {
@@ -114,7 +100,11 @@ export function ScannerScreen({ onClose, onScanComplete }: ScannerScreenProps) {
             'Item Scanned',
             `Identified: ${result.itemName}${result.expiryDate ? `\nExpiry: ${result.expiryDate}` : ''}${result.barcode ? `\nBarcode: ${result.barcode}` : ''}`,
             [
-              { text: 'Scan Another', style: 'cancel' },
+              { 
+                text: 'Scan Another', 
+                style: 'cancel',
+                onPress: resetScan
+              },
               {
                 text: 'Done',
                 onPress: () => {
@@ -129,15 +119,29 @@ export function ScannerScreen({ onClose, onScanComplete }: ScannerScreenProps) {
         Alert.alert(
           'Scan Failed',
           result.error || 'Could not identify the item. Please try again with better lighting or angle.',
-          [{ text: 'OK' }]
+          [{ 
+            text: 'Try Again',
+            onPress: resetScan
+          }]
         );
       }
     } catch (error) {
       console.error('Processing error:', error);
-      Alert.alert('Error', 'Failed to process the scan. Please try again.');
+      Alert.alert('Error', 'Failed to process the scan. Please try again.', [
+        { text: 'Try Again', onPress: resetScan }
+      ]);
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const resetScan = () => {
+    setDetectedBarcode(undefined);
+    setDetectedTexts([]);
+    setScanCount(0);
+    lastBarcodeRef.current = '';
+    setIsScanning(true);
+    setIsProcessing(false);
   };
 
   // Permission handling
@@ -174,18 +178,29 @@ export function ScannerScreen({ onClose, onScanComplete }: ScannerScreenProps) {
         ref={cameraRef}
         style={styles.camera}
         facing="back"
-        mode="video"
+        barcodeScannerSettings={{
+          barcodeTypes: [
+            'qr',
+            'ean13',
+            'ean8',
+            'upc_a',
+            'upc_e',
+            'code39',
+            'code93',
+            'code128',
+            'itf14',
+          ],
+        }}
+        onBarcodeScanned={isScanning ? handleBarcodeScanned : undefined}
       >
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity style={styles.backButton} onPress={onClose}>
             <Text style={styles.backButtonText}>← Back</Text>
           </TouchableOpacity>
-          {!isAIConfigured() && (
-            <View style={styles.mockBadge}>
-              <Text style={styles.mockBadgeText}>Demo Mode</Text>
-            </View>
-          )}
+          <View style={styles.localBadge}>
+            <Text style={styles.localBadgeText}>Local AI</Text>
+          </View>
         </View>
 
         {/* Guide overlay */}
@@ -197,21 +212,25 @@ export function ScannerScreen({ onClose, onScanComplete }: ScannerScreenProps) {
             <View style={[styles.corner, styles.cornerBR]} />
           </View>
           <Text style={styles.guideText}>
-            {isRecording
-              ? 'Recording... Rotate the item slowly'
-              : 'Position the item in the frame'}
+            {isProcessing
+              ? 'Processing...'
+              : isScanning
+              ? 'Point camera at barcode or product label'
+              : 'Scan complete'}
           </Text>
+          
+          {/* Status indicator */}
+          {isScanning && !isProcessing && (
+            <View style={styles.statusContainer}>
+              {detectedBarcode && (
+                <Text style={styles.statusText}>✓ Barcode detected</Text>
+              )}
+              <Text style={styles.statusSubtext}>
+                Collecting data... ({scanCount}/3)
+              </Text>
+            </View>
+          )}
         </View>
-
-        {/* Recording indicator */}
-        {isRecording && (
-          <View style={styles.recordingIndicator}>
-            <View style={styles.recordingDot} />
-            <Text style={styles.recordingText}>
-              Recording: {recordingDuration}s
-            </Text>
-          </View>
-        )}
 
         {/* Processing overlay */}
         {isProcessing && (
@@ -226,16 +245,23 @@ export function ScannerScreen({ onClose, onScanComplete }: ScannerScreenProps) {
           <TouchableOpacity
             style={[
               styles.scanButton,
-              isRecording && styles.scanButtonRecording,
               isProcessing && styles.scanButtonDisabled,
+              detectedBarcode && styles.scanButtonSuccess,
             ]}
-            onPress={isRecording ? stopRecording : startRecording}
-            disabled={isProcessing}
+            onPress={handleManualCapture}
+            disabled={isProcessing || (!detectedBarcode && detectedTexts.length === 0)}
           >
-            <View style={[styles.scanButtonInner, isRecording && styles.scanButtonInnerRecording]} />
+            <View style={[
+              styles.scanButtonInner,
+              detectedBarcode && styles.scanButtonInnerSuccess
+            ]} />
           </TouchableOpacity>
           <Text style={styles.controlText}>
-            {isRecording ? 'Tap to stop' : 'Tap to scan'}
+            {isProcessing 
+              ? 'Processing...' 
+              : detectedBarcode 
+              ? 'Tap to finish' 
+              : 'Scanning...'}
           </Text>
         </View>
       </CameraView>
@@ -266,16 +292,35 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '500',
   },
-  mockBadge: {
-    backgroundColor: 'rgba(255, 165, 0, 0.8)',
+  localBadge: {
+    backgroundColor: 'rgba(76, 175, 80, 0.8)',
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
   },
-  mockBadgeText: {
+  localBadgeText: {
     color: '#fff',
     fontSize: 12,
     fontWeight: '600',
+  },
+  statusContainer: {
+    marginTop: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  statusText: {
+    color: '#4CAF50',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  statusSubtext: {
+    color: '#fff',
+    fontSize: 12,
+    textAlign: 'center',
   },
   guideContainer: {
     flex: 1,
@@ -326,29 +371,7 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
   },
-  recordingIndicator: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 100 : 70,
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  recordingDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#ff0000',
-    marginRight: 8,
-  },
-  recordingText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
-  },
+
   processingOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
@@ -374,8 +397,8 @@ const styles = StyleSheet.create({
     borderWidth: 4,
     borderColor: '#fff',
   },
-  scanButtonRecording: {
-    borderColor: '#ff0000',
+  scanButtonSuccess: {
+    borderColor: '#4CAF50',
   },
   scanButtonDisabled: {
     opacity: 0.5,
@@ -386,11 +409,11 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     backgroundColor: '#fff',
   },
-  scanButtonInnerRecording: {
-    width: 30,
-    height: 30,
-    borderRadius: 4,
-    backgroundColor: '#ff0000',
+  scanButtonInnerSuccess: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#4CAF50',
   },
   controlText: {
     color: '#fff',

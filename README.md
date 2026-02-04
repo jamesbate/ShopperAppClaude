@@ -18,18 +18,19 @@ Scalable Architecture - Foundation laid for future features
 - Persistent Storage: Local data persistence using AsyncStorage
 - Clear Completed: Bulk remove all purchased items
 
-### Camera Scanning
-- Video Recording: Captures videos of grocery items for AI analysis
+### Camera Scanning with Local AI
+- Real-time Barcode Scanning: Uses on-device barcode detection (no internet needed)
 - Visual Guide: Overlay guides for optimal item positioning
-- Recording Timer: Shows recording duration while scanning
-- Permission Handling: Proper camera and microphone permissions
-- Real-time Feedback: Processing indicators and success/failure notifications
+- Live Detection: Shows when barcodes are successfully detected
+- Permission Handling: Proper camera permissions
+- Instant Feedback: Processing indicators and success/failure notifications
 
-### AI Integration (Demo Mode)
-- Vision Analysis: Ready to analyze videos and extract item data
-- Data Extraction: Identifies item name, barcode, expiry date, and category
-- Demo Mode: Currently uses mock data for testing (no API key required)
-- Production Ready: Pre-configured to integrate with OpenAI GPT-4o or similar vision APIs
+### AI Integration (Local On-Device)
+- Local Processing: All AI runs on your phone (no internet or API keys required)
+- Barcode Detection: Supports EAN-13, UPC-A, QR codes, and 9 other formats
+- Text Recognition: Extracts expiry dates from product labels
+- Item Categorization: Automatically categorizes items (dairy, meat, produce, etc.)
+- Privacy-First: No data sent to external servers
 
 ### Auto-Match System
 - Smart Matching: Scanned items automatically match against shopping list
@@ -78,21 +79,32 @@ npm run android
 ### Testing the App
 1. Shopping List: Add items like "milk", "2 eggs", "bread x3"
 2. Camera Scanning: Tap "Scan" button to open camera
-3. Demo Results: Scanning returns mock item data
-4. Auto-Match: Scanned items are matched against your list
+3. Point at Barcode: Aim camera at any product barcode
+4. Auto-Detect: App will detect barcode and identify item
+5. Auto-Match: Scanned items are matched against your list
 
-## Configuration
+## Local AI Processing
 
-### Enable Real AI (Optional)
-Replace demo mode with real AI analysis by configuring your API key:
+### How It Works
+The app uses **local on-device AI** - no internet connection required!
+
+- ✅ **Barcode Scanner**: Built-in Expo barcode detection
+- ✅ **Text Recognition**: Pattern-based expiry date extraction
+- ✅ **Smart Categorization**: Rule-based item classification
+- ✅ **Privacy-First**: All processing happens on your device
+
+See [LOCAL_AI_SETUP.md](./LOCAL_AI_SETUP.md) for detailed information.
+
+### Optional: Cloud AI (Advanced)
+For enhanced accuracy, you can enable cloud-based AI (requires API key):
 
 ```typescript
 // Add to App.tsx after imports
 import { configureAI } from './src/services';
 
 configureAI({ 
-  apiKey: 'your-openai-api-key', 
-  endpoint: 'https://api.openai.com/v1/chat/completions' 
+  apiKey: 'your-google-ai-key', 
+  endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent' 
 });
 ```
 
@@ -125,8 +137,9 @@ The architecture supports easy addition of:
 - TypeScript for type safety
 - Context API for state management
 - AsyncStorage for local persistence
-- Expo Camera for video recording
-- Expo File System for file handling
+- Expo Camera with barcode scanning
+- Expo Barcode Scanner for on-device detection
+- Local AI processing (no external dependencies)
 
 ## Development Status
 
