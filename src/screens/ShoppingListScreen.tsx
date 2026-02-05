@@ -17,11 +17,13 @@ import { useShopping } from '../store/ShoppingContext';
 import { ShoppingListItem } from '../components/ShoppingListItem';
 import { AddItemInput } from '../components/AddItemInput';
 import { ScannerScreen } from './ScannerScreen';
+import { DebugScreen } from './DebugScreen';
 import { ShoppingItem, ScanResult } from '../types';
 
 export function ShoppingListScreen() {
   const { state, addItem, updateItem, removeItem, toggleItem, clearChecked, handleScanResult, getSuggestions } = useShopping();
   const [showScanner, setShowScanner] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
   const [editingItem, setEditingItem] = useState<ShoppingItem | null>(null);
   const [editName, setEditName] = useState('');
   const [editQuantity, setEditQuantity] = useState('1');
@@ -103,12 +105,20 @@ export function ShoppingListScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Shopping List</Text>
-        <TouchableOpacity
-          style={styles.scanButton}
-          onPress={() => setShowScanner(true)}
-        >
-          <Text style={styles.scanButtonText}>Scan</Text>
-        </TouchableOpacity>
+        <View style={styles.headerButtons}>
+          <TouchableOpacity
+            style={styles.debugButton}
+            onPress={() => setShowDebug(true)}
+          >
+            <Text style={styles.debugButtonText}>🔍</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.scanButton}
+            onPress={() => setShowScanner(true)}
+          >
+            <Text style={styles.scanButtonText}>Scan</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* List */}
@@ -163,6 +173,24 @@ export function ShoppingListScreen() {
           onClose={() => setShowScanner(false)}
           onScanComplete={handleScanComplete}
         />
+      </Modal>
+
+      {/* Debug Modal */}
+      <Modal
+        visible={showDebug}
+        animationType="slide"
+        presentationStyle="fullScreen"
+      >
+        <SafeAreaView style={styles.container}>
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => setShowDebug(false)}>
+              <Text style={styles.closeButton}>✕</Text>
+            </TouchableOpacity>
+            <Text style={styles.title}>Debug Database</Text>
+            <View style={{ width: 30 }} />
+          </View>
+          <DebugScreen />
+        </SafeAreaView>
       </Modal>
 
       {/* Edit Modal */}
@@ -366,5 +394,26 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  debugButton: {
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    marginRight: 8,
+  },
+  debugButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  closeButton: {
+    fontSize: 24,
+    color: '#666',
+    fontWeight: 'bold',
   },
 });
